@@ -2,21 +2,7 @@ import utils
 from dbase import dbase
 import random, string
 import contextlib
-from utils import initialize_redis, RedisNotInitialized, RedisOperationFailure
-
-redis_client = initialize_redis()
-used_redis_addresses = set()
-
-def get_a_valid_redis_addr(t):
-    while True:
-        key = t+"_"+ ''.join([random.choice(string.digits+string.lowercase
-                                           ) for i in range(10)])
-        if key not in used_redis_addresses:
-            used_redis_addresses.add(key)
-            return key
-
-def get_redis_type_from_addr(addr):
-    return "dmem:" + addr.split("_")[0]
+from utils import RedisNotInitialized, RedisOperationFailure
 
 def get_redis_object_and_type(v):    
     if isinstance(v, bool):
@@ -26,7 +12,7 @@ def get_redis_object_and_type(v):
         if isinstance(v, atype):
             return str(v), type_name
     if isinstance(v, dbase):        
-        return v.addr(), get_redis_type_from_addr(v.addr())
+        return v.addr(), v._type_
     else:
         raise RedisNestedTypeError("Nested type should either be an atomic type (int, float, str, etc) or a Redis Type")
 
@@ -45,6 +31,8 @@ def get_value_from_object_and_type(obj, t):
         return RedisStr._from_addr(obj)
     elif t == "dmem:list":
         return RedisList._from_addr(obj)
+    elif t == "dmem:dict":
+        return RedisDict._from_addr(obj)
     else:
         return None
 
@@ -141,22 +129,21 @@ DELETE_PLACE_HOLDER = "__TO_BE_DELETED__"
 
 class RedisStr(dbase):
     def __init__(self, s=None):
-        self._addr_ = get_a_valid_redis_addr("str")
+        dbase.__init__(self)
+        self._type_ = "dmem:str"
         # save when initializing
-        if not redis_client:
-            raise RedisNotInitialized()
         if s:
-            ret = redis_client.set(self._addr_, s)
+            ret = self.client.set(self._addr_, s)
             if not ret:
                 raise RedisOperationFailure()
         
     def getvalue(self):
         # refresh the value
-        s = redis_client.get(self._addr_)
+        s = self.client.get(self._addr_)
         return s
 
     def setvalue(self, s):
-        ret = redis_client.set(self._addr_, s)
+        ret = self.client.set(self._addr_, s)
         if not ret:
             raise RedisOperationFailure()
 
@@ -165,7 +152,7 @@ class RedisStr(dbase):
             more = more.getvalue()
         if not isinstance(more, basestring):
             raise TypeError("The argument is not a string")
-        ret = redis_client.append(self._addr_, more)
+        ret = self.client.append(self._addr_, more)
         if not ret:
             raise RedisOperationFailure()
         return self
@@ -185,18 +172,18 @@ class RedisStr(dbase):
         return sub in self.getvalue()
 
     def __getslice__(self, i, j):
-        ret = redis_client.getrange(self._addr_, i, j)
+        ret = self.client.getrange(self._addr_, i, j)
         if not ret:
             raise RedisOperationFailure()
         return ret
 
     def __setslice__(self, i, j, val):
-        ret = redis_client.setrange(self._addr_, i, j, val)
+        ret = self.client.setrange(self._addr_, i, j, val)
         if not ret:
             raise RedisOperationFailure()
     
     def __len__(self):
-        ret = redis_client.strlen(self._addr_)
+        ret = self.client.strlen(self._addr_)
         return ret
 
     def __getitem__(self, idx):
@@ -210,10 +197,6 @@ class RedisStr(dbase):
             return getattr(s, attr)
         
 class RedisList(dbase):
-    def setaddr(self, addr):
-        self._addr_ = addr
-        self._type_addr_ = "_type_" + self._addr_
-
     def __init__(self, _list=None):
         """
         >>> l = RedisList([1,2.0,True,"abc"])
@@ -222,17 +205,17 @@ class RedisList(dbase):
         >>> l._load_objects_and_types()
         (['1', '2.0', '1', 'abc'], ['int', 'float', 'bool', 'str'])
         """
-        self.setaddr(get_a_valid_redis_addr("list"))        
+        dbase.__init__(self)
+        self._type_ = "dmem:list"
+        self._type_addr_ = "_type_" + self._addr_
         self.cache = None
-        # save when initializing
-        if not redis_client:
-            raise RedisNotInitialized()
+        # save to redis when initializing
         if _list:
             self.extend(_list)
         
     def _load_objects_and_types(self):
-        objects = redis_client.lrange(self._addr_, 0, -1)
-        types = redis_client.lrange(self._type_addr_, 0, -1)
+        objects = self.client.lrange(self._addr_, 0, -1)
+        types = self.client.lrange(self._type_addr_, 0, -1)
         return objects, types
 
     def _load(self):
@@ -265,7 +248,7 @@ class RedisList(dbase):
         if self.cache:
             return len(self.cache)
         else:
-            return redis_client.llen(self._addr_)
+            return self.client.llen(self._addr_)
 
     def __getitem__(self, idx):
         """
@@ -286,7 +269,7 @@ class RedisList(dbase):
         """
         if self.cache:
             return self.cache[idx]
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.lindex(self._addr_, idx)
             pipe.lindex(self._type_addr_, idx)
             [obj, t] = pipe.execute()
@@ -314,7 +297,7 @@ class RedisList(dbase):
         if self.cache:
             self.cache[idx] = val
         obj, t = get_redis_object_and_type(val)
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.lset(self._addr_, idx, obj)
             pipe.lset(self._type_addr_, idx, t)
             pipe.execute()
@@ -333,7 +316,7 @@ class RedisList(dbase):
         """
         if self.cache:
             del self.cache[idx]
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.lset(self._addr_, idx, DELETE_PLACE_HOLDER)
             pipe.lrem(self._addr_, 1, DELETE_PLACE_HOLDER)
             pipe.lset(self._type_addr_, idx, DELETE_PLACE_HOLDER)
@@ -352,8 +335,8 @@ class RedisList(dbase):
             return self.cache[start:end]
         if end==0:
             return []
-        objs = redis_client.lrange(self._addr_, start, end-1)
-        ts = redis_client.lrange(self._type_addr_, start, end-1)
+        objs = self.client.lrange(self._addr_, start, end-1)
+        ts = self.client.lrange(self._type_addr_, start, end-1)
         values = []
         for obj, t in zip(objs, ts):
             values.append(get_value_from_object_and_type(obj, t))
@@ -372,16 +355,16 @@ class RedisList(dbase):
         if self.cache:
             del self.cache[start:end]
         if start == 0:
-            redis_client.ltrim(self._addr_, end, -1)
-            redis_client.ltrim(self._type_addr_, end, -1)
+            self.client.ltrim(self._addr_, end, -1)
+            self.client.ltrim(self._type_addr_, end, -1)
         else:
-            redis_client.eval(DELSLICE_LUA_SCRIPT, 2, self._addr_, self._type_addr_, start, end)
+            self.client.eval(DELSLICE_LUA_SCRIPT, 2, self._addr_, self._type_addr_, start, end)
 
     def __contains__(self, val):
         if self.cache:
             return val in self.cache
         obj, t = get_redis_object_and_type(val)
-        idx = redis_client.eval(FIND_ITEM_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
+        idx = self.client.eval(FIND_ITEM_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
         if idx < 0:
             return False
         return True
@@ -398,7 +381,7 @@ class RedisList(dbase):
         if self.cache:
             self.cache.append(val)
         obj, t = get_redis_object_and_type(val)
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.rpush(self._addr_, obj)
             pipe.rpush(self._type_addr_, t)
             pipe.execute()
@@ -407,25 +390,25 @@ class RedisList(dbase):
         if isinstance(iterable, RedisList):
             objs, types = iterable._load_objects_and_types()
             # multi value rpush only after redis >= 2.4
-            # redis_client.rpush(self._addr_, *objs)
-            # redis_client.rpush(self._type_addr_, *types)
-            with redis_client.pipeline() as pipe:
+            # self.client.rpush(self._addr_, *objs)
+            # self.client.rpush(self._type_addr_, *types)
+            with self.client.pipeline() as pipe:
                 for obj, t in zip(objs, types):
-                    redis_client.rpush(self._addr_, obj)
-                    redis_client.rpush(self._type_addr_, t)
+                    pipe.rpush(self._addr_, obj)
+                    pipe.rpush(self._type_addr_, t)
                 pipe.execute()
         else:            
             if isinstance(iterable, RedisStr):
                 iterable = iterable.value()
             for item in iterable:
                 obj, t = get_redis_object_and_type(item)
-                redis_client.rpush(self._addr_, obj)
-                redis_client.rpush(self._type_addr_, t)
+                self.client.rpush(self._addr_, obj)
+                self.client.rpush(self._type_addr_, t)
 
     def pop(self):
         if self.cache:
             self.cache.pop()
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.rpop(self._addr_)
             pipe.rpop(self._type_addr_)
             [obj, t] = pipe.execute()
@@ -445,10 +428,10 @@ class RedisList(dbase):
         if self.cache:
             self.cache.remove(val)
         obj, t = get_redis_object_and_type(val)
-        idx = redis_client.eval(FIND_ITEM_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
+        idx = self.client.eval(FIND_ITEM_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
 
         if idx >= 0:
-            with redis_client.pipeline() as pipe:
+            with self.client.pipeline() as pipe:
                 # First mark the type at index to be deleted, then call LREM
                 pipe.lset(self._addr_, idx, DELETE_PLACE_HOLDER)
                 pipe.lrem(self._addr_, 1, DELETE_PLACE_HOLDER)
@@ -466,7 +449,7 @@ class RedisList(dbase):
         # different from list.sort(), this doesn't accept parameters
         if self.cache:
             self.cache.sort()
-        redis_client.sort(self._addr_, store=self._addr_) # sort in place
+        self.client.sort(self._addr_, store=self._addr_) # sort in place
 
     def index(self, val):
         """
@@ -487,41 +470,41 @@ class RedisList(dbase):
         if self.cache:
             return self.cache.index(val)
         obj, t = get_redis_object_and_type(val)
-        idx = redis_client.eval(FIND_ITEM_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
+        idx = self.client.eval(FIND_ITEM_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
         return idx
 
     def reverse(self):
         if self.cache:
             self.cache.reverse()
-        redis_client.eval(REVERSE_LUA_SCRIPT, 2, self._addr_, self._type_addr_)
+        self.client.eval(REVERSE_LUA_SCRIPT, 2, self._addr_, self._type_addr_)
 
     def insert(self,idx, val):
         if self.cache:
             self.cache.insert(idx, val)
         obj, t = get_redis_object_and_type(val)
-        redis_client.eval(INSERT_LUA_SCRIPT, 2, self._addr_, self._type_addr_, idx, obj, t)
+        self.client.eval(INSERT_LUA_SCRIPT, 2, self._addr_, self._type_addr_, idx, obj, t)
 
     def count(self, val):
         if self.cache:
             return self.cache.count(val)
         obj, t = get_redis_object_and_type(val)
-        return redis_client.eval(COUNT_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
+        return self.client.eval(COUNT_LUA_SCRIPT, 2, self._addr_, self._type_addr_, obj, t)
 
     # define methods for redis specific commands
     def lpush(self, val):
         if self.cache:
             self.cache.insert(0, val)
         obj, t = get_redis_object_and_type(val)
-        redis_client.lpush(self._addr_, obj)
-        redis_client.lpush(self._type_addr_, t)
+        self.client.lpush(self._addr_, obj)
+        self.client.lpush(self._type_addr_, t)
 
     def lpop(self):
         if self.cache:
             v = self.cache[0]
             del self.cache[0]
             return v
-        obj = redis_client.lpop(self._addr_)
-        t = redis_client.lpop(self._type_addr_)
+        obj = self.client.lpop(self._addr_)
+        t = self.client.lpop(self._type_addr_)
         return get_value_from_object_and_type(obj, t)
 
 CLEARKEYS_LUA_SCRIPT = """
@@ -536,19 +519,17 @@ end
 """
 
 class RedisDict(dbase):
-    def setaddr(self, addr):
-        self._addr_ = addr
-        self._type_addr_ = "_type_" + self._addr_
-
     def __init__(self, _dict=None):
-        self.setaddr(get_a_valid_redis_addr("dict"))        
+        dbase.__init__(self)
+        self._type_addr_ = "_type_" + self._addr_
+        self._type_ = "dmem:dict"
         self.cache = None
         if _dict:
             self.update(_dict)
 
     def _load_objects_and_types(self):
-        objdict = redis_client.hgetall(self._addr_)
-        tdict = redis_client.hgetall(self._type_addr_)
+        objdict = self.client.hgetall(self._addr_)
+        tdict = self.client.hgetall(self._type_addr_)
         return objdict, tdict
 
     def _load(self):
@@ -572,17 +553,17 @@ class RedisDict(dbase):
     def __contains__(self, key):
         if self.cache:
             return key in self.cache
-        return redis_client.hexists(self._addr_, key)
+        return self.client.hexists(self._addr_, key)
 
     def __len__(self):
         if self.cache:
             return len(self.cache)
-        return redis_client.hlen(self._addr_)
+        return self.client.hlen(self._addr_)
 
     def __getitem__(self, key):
         if self.cache:
             return self.cache[key]
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.hget(self._addr_, key)
             pipe.hget(self._type_addr_, key)
             [obj, t] = pipe.execute()
@@ -595,7 +576,7 @@ class RedisDict(dbase):
         if self.cache:
             self.cache[key] = value
         obj, t = get_redis_object_and_type(value)
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.hset(self._addr_, key, obj)
             pipe.hset(self._type_addr_, key, t)
             pipe.execute()
@@ -603,7 +584,7 @@ class RedisDict(dbase):
     def __delitem__(self, key):
         if self.cache:
             del self.cache[key]
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.hdel(self._addr_, key)
             pipe.hdel(self._type_addr_, key)
             pipe.execute()
@@ -611,8 +592,8 @@ class RedisDict(dbase):
     def clear(self):
         if self.cache:
             self.cache = {}
-        redis_client.delete(self._addr_)
-        redis_client.delete(self._type_addr_)
+        self.client.delete(self._addr_)
+        self.client.delete(self._type_addr_)
 
     def copy(self):
         # shallow copy of self
@@ -641,12 +622,12 @@ class RedisDict(dbase):
     def keys(self):
         if self.cache:
             return self.cache.keys()
-        return redis_client.hkeys(self._addr_)
+        return self.client.hkeys(self._addr_)
 
     def values(self):
         if self.cache:
             return self.cache.values()
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.hvals(self._addr_)
             pipe.hvals(self._type_addr_)
             objs, ts = pipe.execute()
@@ -671,7 +652,7 @@ class RedisDict(dbase):
             obj, t = get_redis_object_and_type(v)
             objdict[k] = obj
             tdict[k] = t        
-        with redis_client.pipeline() as pipe:
+        with self.client.pipeline() as pipe:
             pipe.hmset(self._addr_, objdict)
             pipe.hmset(self._type_addr_, tdict)
             pipe.execute()
