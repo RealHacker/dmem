@@ -95,7 +95,7 @@ redis.call('lrem', key, stop-start, '_REDIS_LUA_PLACEHOLDER_')
 redis.call('lrem', tkey, stop-start, '_REDIS_LUA_PLACEHOLDER_')
 """
 
-class RedisList(dbase):
+class RedisList(dbase, list):
     def __init__(self, _list=None):
         """
         >>> l = RedisList([1,2.0,True,"abc"])
@@ -134,6 +134,11 @@ class RedisList(dbase):
         finally:
             self.cache = None
     
+    def __iter__(self):
+	if self.cache:
+		return iter(self.cache)
+	return iter(self._load())
+
     def __len__(self):
         """
         >>> l = RedisList([1,2.0,True,"abc"])

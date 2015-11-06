@@ -2,6 +2,7 @@ from utils import RedisClientPool
 import random, string
 
 PRESENCE_PREFIX = "_exists_"
+LOCK_PREFIX = "_lock_"
 
 class dbase(object):
     def __init__(self):
@@ -22,6 +23,7 @@ class dbase(object):
         obj._addr_ = addr
         obj._node_ = cls.get_node_from_addr(addr)
         obj.client = RedisClientPool.get_pool().get_client(obj._node_)
+        obj._incr_refcnt()
         return obj
 
     @classmethod
@@ -41,8 +43,40 @@ class dbase(object):
     def get_a_valid_redis_addr(self):
         while True:
             key = ''.join([random.choice(string.digits+string.lowercase) for i in range(10)])
-            presence_key = PRESENCE_PREFIX + key
+            presence_key = PRESENCE_PREFIX + self._node_  +":" + key
             present = self.client.getset(presence_key, 1)
             if not present:
                 return self._node_ + ":" + key
+
+    def _incr_refcnt(self):
+        presence_key = PRESENCE_PREFIX + self._addr_
+        refcnt = self.client.incr(presence_key)
+
+    def __del__(self):
+        # This implements a reference couting on redis, each reference represents a node using the object
+        # when the counter reaches 0, the redis key is removed
+        # also the presence key is open for address allocation
+        presence_key = PRESENCE_PREFIX + self._addr_
+        refcnt = self.client.decr(presence_key)
+        if not refcnt:
+            self.destroy()
+
+    def destroy(self):
+        # should be overrided if subclass needs to destroy other keys
+        self.client.delete(self._addr_)
+
+    def lock(self, ttl=6):
+        # add a distributed lock on redis for this object
+        lock_key = LOCK_PREFIX + self._addr_
+        self._lockval = ''.join([random.choice(string.digits+string.lowercase) for i in range(6)])
+        while True:
+            result = self.client.set(lock_key, self._lockval, nx=True, px=ttl)
+            if result:
+                return 
+
+    def unlock(self):
+        lock_key = LOCK_PREFIX + self._addr_
+        self.client.eval(UNLOCK_LUA_SCRIPT, 1, lock_key, self._lockval)
+
+
 

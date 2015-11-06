@@ -13,7 +13,7 @@ redis.call('hdel', taddr, k)
 return v
 """
 
-class RedisDict(dbase):
+class RedisDict(dbase, dict):
     def __init__(self, _dict=None):
         dbase.__init__(self)
         self._type_addr_ = "_type_" + self._addr_
@@ -44,6 +44,11 @@ class RedisDict(dbase):
             yield self.cache
         finally:
             self.cache = None
+
+    def __iter__(self):
+	if self.cache:
+	    return iter(self.cache)
+        return iter(self.keys())
 
     def __contains__(self, key):
         if self.cache:

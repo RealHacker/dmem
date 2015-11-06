@@ -81,7 +81,7 @@ def get_value_from_object_and_type(obj, t):
         return None
 
 # Configure the client pool singleton instance
-RedisClientPool.get_pool().load_config({"redis1": {"host":"127.0.0.1", "port": 6379, "db":0}})
+RedisClientPool.get_pool().load_config({"redis1": {"host":"192.168.1.7", "port": 6379, "db":0}})
 
 class ConfigReadError(Exception):
     """Raised when failed to read or parse config file"""
