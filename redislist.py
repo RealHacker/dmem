@@ -126,6 +126,10 @@ class RedisList(dbase, list):
             values.append(value)
         return values
 
+    def destroy(self):
+        dbase.destroy(self)
+        self.client.delete(self._type_addr_)
+        
     @contextlib.contextmanager
     def loaded(self):
         self.cache = self._load()

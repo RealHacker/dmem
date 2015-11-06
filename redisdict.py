@@ -37,6 +37,10 @@ class RedisDict(dbase, dict):
             _dict[key] = v
         return _dict
 
+    def destroy(self):
+        dbase.destroy(self)
+        self.client.delete(self._type_addr_)
+
     @contextlib.contextmanager
     def loaded(self):
         self.cache = self._load()
@@ -46,8 +50,8 @@ class RedisDict(dbase, dict):
             self.cache = None
 
     def __iter__(self):
-	if self.cache:
-	    return iter(self.cache)
+        if self.cache:
+            return iter(self.cache)
         return iter(self.keys())
 
     def __contains__(self, key):

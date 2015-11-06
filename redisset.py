@@ -6,7 +6,6 @@ from utils import *
 class RedisSet(dbase):
     def __init__(self, _elements=None):
         dbase.__init__(self)
-        self._type_addr_ = "_type_" + self._addr_
         self._type_ = "dmem:set"
         self.cache = None
         if _elements:
@@ -14,18 +13,25 @@ class RedisSet(dbase):
 
     def _load_objects_and_types(self):
         objs = self.client.smembers(self._addr_)
-        ts = self.client.hgetall(self._type_addr_)
-        return objs, ts
+        tuples = []
+        for obj in objs:
+            tuples.append(self._get_value_type_from_object(obj))
+        return tuples
 
     def _load(self):
-        objs, ts = self._load_objects_and_types()
-        values = set()
-        for obj in objs:
-            t = ts[obj]
-            v = get_value_from_object_and_type(obj, t)
-            values.add(v)
+        tuples = self._load_objects_and_types()
+        values = set([get_value_from_object_and_type(o, t) for o,t in tuples])
         return values
     
+    @staticmethod
+    def _get_value_type_from_object(obj):
+        split_at = obj.index("#")
+        return (obj[split_at+1:], obj[:split_at])
+
+    @staticmethod
+    def _get_object_from_value_type(v, t):
+        return t+"#"+v
+
     @contextlib.contextmanager
     def loaded(self):
         self.cache = self._load()
@@ -38,11 +44,8 @@ class RedisSet(dbase):
         if self.cache:
             return element in self.cache
         obj, t = get_redis_object_and_type(element)
-        with self.client.pipeline() as pipe:
-            pipe.sismember(self._addr_, obj)
-            pipe.hget(self._type_addr_, obj)
-            isMember, tt = pipe.execute()
-        return isMember and tt==t
+        v = self._get_object_from_value_type(obj, t)
+        return self.client.sismember(self._addr_, v)
 
     def __len__(self):
         if self.cache:
@@ -52,10 +55,10 @@ class RedisSet(dbase):
     def __and__(self, other):
         if isinstance(other, RedisSet):
             objs = self.client.sinter(self._addr_, other._addr_)
-            typehash = self.client.hgetall(self._type_addr_)
             intersection = set()
             for obj in objs:
-                v = get_value_from_object_and_type(obj, typehash[obj])
+                v, t = self._get_value_type_from_object(obj)
+                v = get_value_from_object_and_type(v, t)
                 intersection.add(v)
         else:
             if self.cache:
@@ -67,3 +70,11 @@ class RedisSet(dbase):
     def update(self, other):
         if isinstance(other, RedisSet):
             self.client.sunionstore(self._addr_, self._addr_, other._addr_)
+        else:
+            newitems = []
+            for item in other:
+                obj, t = get_redis_object_and_type(item)
+                newitems.append(self._get_object_from_value_type(obj, t))
+            self.client.sadd(self._addr_, *newitems)
+
+
