@@ -1,4 +1,4 @@
-from dbase import dbase
+from dbase import *
 import random, string
 import contextlib
 from utils import *

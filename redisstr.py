@@ -1,4 +1,4 @@
-from dbase import dbase
+from dbase import *
 import random, string
 import contextlib
 from utils import *
@@ -42,7 +42,7 @@ class RedisStr(dbase):
         return news
 
     def __str__(self):
-        return s.getvalue()
+        return self.getvalue()
 
     def __contains__(self, sub):
         return sub in self.getvalue()

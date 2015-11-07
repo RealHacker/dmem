@@ -86,5 +86,40 @@ class dbase(object):
         lock_key = LOCK_PREFIX + self._addr_
         self.client.eval(UNLOCK_LUA_SCRIPT, 1, lock_key, self._lockval)
 
+def get_redis_object_and_type(v):    
+    if isinstance(v, bool):
+        return "1" if v else "0", "bool"
+    atom_types = [(int, "int"), (long, "long"), (float, "float"), (basestring, "str")]
+    for atype, type_name in atom_types:
+        if isinstance(v, atype):
+            return str(v), type_name
+    if isinstance(v, dbase):        
+        return v.addr(), v._type_
+    else:
+        raise RedisNestedTypeError("Nested type should either be an atomic type (int, float, str, etc) or a Redis Type")
 
-
+def get_value_from_object_and_type(obj, t):
+    if t == "str":
+        return obj
+    elif t == "int":
+        return int(obj)
+    elif t == "long":
+        return long(obj)
+    elif t == "float":
+        return float(obj)
+    elif t == "bool":
+        return bool(int(obj))
+    elif t == "dmem:str":
+        from redisstr import RedisStr
+        return RedisStr._from_addr(obj)
+    elif t == "dmem:list":
+        from redislist import RedisList
+        return RedisList._from_addr(obj)
+    elif t == "dmem:dict":
+        from redisdict import RedisDict
+        return RedisDict._from_addr(obj)
+    elif t == "dmem:set":
+        from redisset import RedisSet
+        return RedisSet._from_addr(obj)
+    else:
+        return None
