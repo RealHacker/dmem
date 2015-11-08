@@ -121,5 +121,8 @@ def get_value_from_object_and_type(obj, t):
     elif t == "dmem:set":
         from redisset import RedisSet
         return RedisSet._from_addr(obj)
+    elif t == "dmem:object":
+        from redisobj import RedisObject
+        return RedisObject._from_addr(obj)
     else:
         return None
