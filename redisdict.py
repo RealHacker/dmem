@@ -13,14 +13,16 @@ redis.call('hdel', taddr, k)
 return v
 """
 
-class RedisDict(dbase, dict):
+class RedisDict(dbase):
     def __init__(self, _dict=None):
-        dbase.__init__(self)
+        dbase.__init__(self)        
+        if _dict:
+            self.update(_dict)
+
+    def initialize(self):
         self._type_addr_ = "_type_" + self._addr_
         self._type_ = "dmem:dict"
         self.cache = None
-        if _dict:
-            self.update(_dict)
 
     def _load_objects_and_types(self):
         objdict = self.client.hgetall(self._addr_)

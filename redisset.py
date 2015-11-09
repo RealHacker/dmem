@@ -6,21 +6,22 @@ from utils import *
 TEMP_PREFIX = "_temp_"
 
 XOR_LUA_SCRIPT = """
-key1 = KEYS[1]
-key2 = KEYS[2]
-diff1 = redis.call('sdiff', key1, key2)
-diff2 = redis.call('sdiff', key2, key1)
+local key1 = KEYS[1]
+local key2 = KEYS[2]
+local diff1 = redis.call('sdiff', key1, key2)
+local diff2 = redis.call('sdiff', key2, key1)
+local len1 = #diff1
 for i=1,#diff2 do
-    diff1[#diff1+i] = diff2[i]
+    diff1[len1+i] = diff2[i]
 end
 return diff1
 """
 
 XORSTORE_LUA_SCRIPT = """
-key1 = KEYS[1]
-key2 = KEYS[2]
-intersection = redis.call('sinter', key1, key2)
-redis.call('sunionstore', key1, key2)
+local key1 = KEYS[1]
+local key2 = KEYS[2]
+local intersection = redis.call('sinter', key1, key2)
+redis.call('sunionstore', key1, key1, key2)
 for i=1,#intersection do
     redis.call('srem', key1, intersection[i])
 end
@@ -29,10 +30,12 @@ end
 class RedisSet(dbase):
     def __init__(self, _elements=None):
         dbase.__init__(self)
-        self._type_ = "dmem:set"
-        self.cache = None
         if _elements:
             self.update(_elements)
+
+    def initialize(self): # initializations specific to RedisSet
+        self._type_ = "dmem:set"
+        self.cache = None
 
     def _load_objects_and_types(self):
         objs = self.client.smembers(self._addr_)

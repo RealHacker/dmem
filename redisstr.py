@@ -6,13 +6,15 @@ from utils import *
 class RedisStr(dbase):
     def __init__(self, s=None):
         dbase.__init__(self)
-        self._type_ = "dmem:str"
         # save when initializing
         if s:
             ret = self.client.set(self._addr_, s)
             if not ret:
                 raise RedisOperationFailure()
-        
+    
+    def initialize(self):
+        self._type_ = "dmem:str"
+
     def getvalue(self):
         # refresh the value
         s = self.client.get(self._addr_)

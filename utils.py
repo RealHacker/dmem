@@ -48,10 +48,8 @@ class RedisClient(object): # A wrapper of redis client for debugging, etc
         print "Calling method %s of redis client"%attr
         return getattr(self.client, attr)
         
-
-
 # Configure the client pool singleton instance
-RedisClientPool.get_pool().load_config({"redis1": {"host":"127.0.0.1", "port": 6379, "db":0}})
+RedisClientPool.get_pool().load_config({"redis1": {"host":"192.168.1.7", "port": 6379, "db":0}})
 
 class ConfigReadError(Exception):
     """Raised when failed to read or parse config file"""

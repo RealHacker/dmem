@@ -95,7 +95,7 @@ redis.call('lrem', key, stop-start, '_REDIS_LUA_PLACEHOLDER_')
 redis.call('lrem', tkey, stop-start, '_REDIS_LUA_PLACEHOLDER_')
 """
 
-class RedisList(dbase, list):
+class RedisList(dbase):
     def __init__(self, _list=None):
         """
         >>> l = RedisList([1,2.0,True,"abc"])
@@ -105,13 +105,15 @@ class RedisList(dbase, list):
         (['1', '2.0', '1', 'abc'], ['int', 'float', 'bool', 'str'])
         """
         dbase.__init__(self)
-        self._type_ = "dmem:list"
-        self._type_addr_ = "_type_" + self._addr_
-        self.cache = None
         # save to redis when initializing
         if _list:
             self.extend(_list)
         
+    def initialize(self):
+        self._type_ = "dmem:list"
+        self._type_addr_ = "_type_" + self._addr_
+        self.cache = None
+
     def _load_objects_and_types(self):
         objects = self.client.lrange(self._addr_, 0, -1)
         types = self.client.lrange(self._type_addr_, 0, -1)

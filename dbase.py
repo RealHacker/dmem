@@ -20,6 +20,10 @@ class dbase(object):
         self.client = poll.get_client(self._node_)
         # then pick a random address for the object
         self._addr_ = self.get_a_valid_redis_addr()
+        self.initialize()
+
+    def initialize(self): # initialization specific to each subtype
+        pass
 
     def addr(self):
         return self._addr_
@@ -30,6 +34,7 @@ class dbase(object):
         obj._addr_ = addr
         obj._node_ = cls.get_node_from_addr(addr)
         obj.client = RedisClientPool.get_pool().get_client(obj._node_)
+        obj.initialize()
         # when instantiate a redis object from address, increment the counter
         obj._incr_refcnt() 
         return obj
