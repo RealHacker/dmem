@@ -131,3 +131,9 @@ def get_value_from_object_and_type(obj, t):
         return RedisObject._from_addr(obj)
     else:
         return None
+
+def test():
+    # Configure the client pool singleton instance
+    RedisClientPool.get_pool().load_config({"redis1": {"host":"127.0.0.1", "port": 6379, "db":0}})
+
+

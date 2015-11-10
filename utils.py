@@ -1,6 +1,16 @@
 import redis
 import json
 
+DEBUG = False
+
+def enable_debug():
+    global DEBUG
+    DEBUG = True
+
+def disable_debug():
+    global DEBUG
+    DEBUG = False
+
 class RedisClientPool(object):
     singleton = None
     def __init__(self):
@@ -45,12 +55,10 @@ class RedisClient(object): # A wrapper of redis client for debugging, etc
         self.client = redis.StrictRedis(host=host, port=port, db=db)
 
     def __getattr__(self, attr):
-        print "Calling method %s of redis client"%attr
+        if DEBUG:
+            print "Calling command %s of redis client"%attr
         return getattr(self.client, attr)
         
-# Configure the client pool singleton instance
-RedisClientPool.get_pool().load_config({"redis1": {"host":"192.168.1.7", "port": 6379, "db":0}})
-
 class ConfigReadError(Exception):
     """Raised when failed to read or parse config file"""
 
